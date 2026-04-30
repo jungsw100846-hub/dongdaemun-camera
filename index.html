@@ -6,6 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#000000">
+<link rel="manifest" href="/manifest.json">
 <title>Dongdaemun Camera</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -21,7 +22,7 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: #000; colo
 
 /* Camera stage */
 #stage { position: fixed; inset: 0; display: none; }
-#video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #000; }
+#video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
 #guide { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 
 /* HUD */
@@ -63,7 +64,7 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: #000; colo
 <!-- ===== Camera Stage ===== -->
 <div id="stage">
 <video id="video" autoplay playsinline muted></video>
-<svg id="guide" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg"></svg>
+<svg id="guide" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg"></svg>
 
 <div id="hud">
 <div class="hud-top">
@@ -276,6 +277,8 @@ function showHint(msg, ms = 1800) {
 // ===== Camera start =====
 async function startCamera() {
   gateErr.textContent = '';
+  // Fire fullscreen request immediately, before any await consumes the user gesture
+  const fsPromise = requestFullscreenSafe();
   try {
     // Request landscape 1920x1080 from rear camera
     stream = await navigator.mediaDevices.getUserMedia({
@@ -292,9 +295,20 @@ async function startCamera() {
     gate.style.display = 'none';
     stage.style.display = 'block';
     requestOrientation();
+    await fsPromise;
     lockOrientationLandscape();
   } catch (e) {
     gateErr.textContent = '카메라 접근 실패: ' + (e.message || e.name) + '\n주소창의 자물쇠 아이콘에서 권한을 확인해주세요.';
+  }
+}
+
+async function requestFullscreenSafe() {
+  try {
+    if (document.documentElement.requestFullscreen) {
+      await document.documentElement.requestFullscreen();
+    }
+  } catch (e) {
+    // User denied, browser unsupported, or already fullscreen — ignore
   }
 }
 
