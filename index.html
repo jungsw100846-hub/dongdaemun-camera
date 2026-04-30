@@ -67,7 +67,7 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: #000; colo
 
 <div id="hud">
 <div class="hud-top">
-<div class="hud-pill">TYPE 1 · 16:9</div>
+<div class="hud-pill" id="type-pill">TYPE 1 · 16:9</div>
 <div class="hud-level">
 <span>tilt</span>
 <div class="level-track"><div class="level-dot" id="level-dot"></div></div>
@@ -164,6 +164,8 @@ function svgEl(tag, attrs) {
 function drawGuide(typeId) {
   const spec = GUIDE_TYPES[typeId];
   currentGuide = spec;
+  const pill = document.getElementById('type-pill');
+  if (pill) pill.textContent = 'TYPE ' + typeId.slice(4) + ' · 16:9';
   const svg = document.getElementById('guide');
   const VW = VIEWBOX.w, VH = VIEWBOX.h;
   while (svg.firstChild) svg.removeChild(svg.firstChild);
@@ -173,8 +175,8 @@ function drawGuide(typeId) {
   const maskTop = maskH;
   const maskBottom = VH - maskH;
   const visibleH = VH - 2 * maskH;
-  svg.appendChild(svgEl('rect', { x: 0, y: 0, width: VW, height: maskH, fill: '#000', 'fill-opacity': 0.78 }));
-  svg.appendChild(svgEl('rect', { x: 0, y: maskBottom, width: VW, height: maskH, fill: '#000', 'fill-opacity': 0.78 }));
+  svg.appendChild(svgEl('rect', { x: 0, y: 0, width: VW, height: maskH, fill: '#000', opacity: 0.78 }));
+  svg.appendChild(svgEl('rect', { x: 0, y: maskBottom, width: VW, height: maskH, fill: '#000', opacity: 0.78 }));
   svg.appendChild(svgEl('line', { x1: 0, y1: maskTop, x2: VW, y2: maskTop, stroke: '#fff', 'stroke-width': 2, 'stroke-opacity': 0.5 }));
   svg.appendChild(svgEl('line', { x1: 0, y1: maskBottom, x2: VW, y2: maskBottom, stroke: '#fff', 'stroke-width': 2, 'stroke-opacity': 0.5 }));
 
