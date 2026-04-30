@@ -82,6 +82,9 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: #000; colo
 .back-btn:active { color: #fff; }
 
 #type-pill { cursor: pointer; pointer-events: auto; }
+#gps-indicator { font-size: 10px; transition: color 0.2s; }
+#gps-indicator.ok { color: #5DCAA5; }
+#gps-indicator.fail { color: rgba(255,255,255,0.4); }
 </style>
 </head>
 <body>
@@ -131,6 +134,7 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: #000; colo
 <polyline points="2,11 2,14 5,14"/>
 </svg>
 </button>
+<span class="hud-pill fail" id="gps-indicator">GPS ✗</span>
 <div class="hud-level">
 <span>tilt</span>
 <div class="level-track"><div class="level-dot" id="level-dot"></div></div>
@@ -165,7 +169,17 @@ let lastRecDurationSec = 0;
 let lastStopReason = null;
 const sessionId = 'session_' + Math.random().toString(36).slice(2, 10);
 let shotIndex = 0;
-const APP_VERSION = 'phase_2.3';
+const APP_VERSION = 'phase_2.4';
+
+let currentLocation = null;
+let locationStatus = 'unknown';
+let gpsHintShown = false;
+
+let audioContext = null;
+let analyser = null;
+let audioSource = null;
+let audioSamples = [];
+let audioInterval = null;
 
 const DISTRICTS = {
   dongdaemun: { id: 'dongdaemun', name: '동대문 일대', subtitle: '밀리오레 · APM · 굿모닝시티 · 두타' },
@@ -491,7 +505,9 @@ async function startCamera() {
     });
     video.srcObject = stream;
     await video.play();
+    setupAudioAnalysis();
     requestOrientation();
+    requestLocation();
     await fsPromise;
     lockOrientationLandscape();
     showScreen('type-select');
@@ -588,6 +604,9 @@ function startRecording() {
   }
   chunks = [];
   tiltSamples = [];
+  audioSamples = [];
+  startAudioSampling();
+  requestLocation();
   recorder.ondataavailable = ev => { if (ev.data && ev.data.size > 0) chunks.push(ev.data); };
   recorder.onstop = onRecordStop;
   recorder.start();
@@ -614,6 +633,7 @@ function stopRecording(reason = 'auto_completed') {
   lastStopReason = reason;
   shotIndex++;
   clearInterval(recInterval);
+  stopAudioSampling();
   try { recorder.stop(); } catch (e) {}
   shutter.classList.remove('recording');
   recInfo.classList.remove('on');
@@ -648,6 +668,200 @@ function onRecordStop() {
   downloadSidecar(sidecar, shotId);
 
   showHint('내 파일 > Download 폴더에 영상 + 메타데이터 저장됨', 4000);
+}
+
+// ===== Device, location, audio, sun =====
+function detectDevice() {
+  const ua = navigator.userAgent;
+  const isAndroid = /Android/i.test(ua);
+  const isIOS = /iPhone|iPad|iPod/i.test(ua);
+
+  let platform = 'unknown';
+  let osVersion = null;
+  let modelHint = null;
+  let browser = null;
+
+  if (isAndroid) {
+    platform = 'Android';
+    const m = ua.match(/Android\s+([\d.]+)/);
+    if (m) osVersion = 'Android ' + m[1];
+    const patterns = [/;\s*(SM-[A-Z0-9]+)/, /;\s*(Pixel\s+\d+\w*)/, /;\s*([^;)]+?)\s+Build\//];
+    for (const p of patterns) {
+      const mm = ua.match(p);
+      if (mm) { modelHint = mm[1].trim(); break; }
+    }
+  } else if (isIOS) {
+    platform = 'iOS';
+    const m = ua.match(/OS\s+([\d_]+)/);
+    if (m) osVersion = 'iOS ' + m[1].replace(/_/g, '.');
+    if (/iPhone/.test(ua)) modelHint = 'iPhone';
+    else if (/iPad/.test(ua)) modelHint = 'iPad';
+    else if (/iPod/.test(ua)) modelHint = 'iPod';
+  }
+
+  if (/Edg\//.test(ua)) {
+    const m = ua.match(/Edg\/(\d+)/);
+    if (m) browser = 'Edge ' + m[1];
+  } else if (/Chrome\//.test(ua)) {
+    const m = ua.match(/Chrome\/(\d+)/);
+    if (m) browser = 'Chrome ' + m[1];
+  } else if (/Firefox\//.test(ua)) {
+    const m = ua.match(/Firefox\/(\d+)/);
+    if (m) browser = 'Firefox ' + m[1];
+  } else if (/Safari\//.test(ua)) {
+    const m = ua.match(/Version\/(\d+)/);
+    if (m) browser = 'Safari ' + m[1];
+  }
+
+  return {
+    user_agent: ua,
+    model_hint: modelHint,
+    platform: platform,
+    os_version: osVersion,
+    browser: browser,
+    screen: {
+      width: screen.width,
+      height: screen.height,
+      device_pixel_ratio: window.devicePixelRatio
+    }
+  };
+}
+
+const deviceInfo = detectDevice();
+
+function requestLocation() {
+  return new Promise(resolve => {
+    if (!navigator.geolocation) {
+      resolve(null);
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        currentLocation = {
+          latitude: pos.coords.latitude,
+          longitude: pos.coords.longitude,
+          accuracy_m: Math.round(pos.coords.accuracy),
+          captured_at: isoLocal(new Date(pos.timestamp))
+        };
+        locationStatus = 'available';
+        updateGpsIndicator();
+        resolve(currentLocation);
+      },
+      err => {
+        if (err.code === 1) {
+          locationStatus = 'denied';
+          if (!gpsHintShown) {
+            showHint('위치 권한 거부됨 — GPS 좌표는 기록되지 않습니다', 4000);
+            gpsHintShown = true;
+          }
+        } else if (locationStatus === 'unknown') {
+          locationStatus = 'unavailable';
+        }
+        updateGpsIndicator();
+        resolve(null);
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+    );
+  });
+}
+
+function updateGpsIndicator() {
+  const ind = document.getElementById('gps-indicator');
+  if (!ind) return;
+  if (currentLocation) {
+    ind.textContent = 'GPS ✓';
+    ind.classList.add('ok');
+    ind.classList.remove('fail');
+  } else {
+    ind.textContent = 'GPS ✗';
+    ind.classList.add('fail');
+    ind.classList.remove('ok');
+  }
+}
+
+async function setupAudioAnalysis() {
+  if (!stream) return;
+  if (stream.getAudioTracks().length === 0) return;
+  try {
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioContext.state === 'suspended') {
+      try { await audioContext.resume(); } catch (e) {}
+    }
+    audioSource = audioContext.createMediaStreamSource(stream);
+    analyser = audioContext.createAnalyser();
+    analyser.fftSize = 2048;
+    audioSource.connect(analyser);
+  } catch (e) {
+    audioContext = null;
+    analyser = null;
+  }
+}
+
+function startAudioSampling() {
+  if (!analyser) return;
+  const buffer = new Float32Array(analyser.fftSize);
+  audioInterval = setInterval(() => {
+    analyser.getFloatTimeDomainData(buffer);
+    let sumSq = 0;
+    for (let i = 0; i < buffer.length; i++) sumSq += buffer[i] * buffer[i];
+    const rms = Math.sqrt(sumSq / buffer.length);
+    const db = rms > 0 ? Math.max(-100, 20 * Math.log10(rms)) : -100;
+    audioSamples.push(db);
+  }, 100);
+}
+
+function stopAudioSampling() {
+  if (audioInterval) {
+    clearInterval(audioInterval);
+    audioInterval = null;
+  }
+}
+
+function getAudioStats() {
+  if (audioSamples.length === 0) return null;
+  const sum = audioSamples.reduce((a, b) => a + b, 0);
+  const round1 = n => Math.round(n * 10) / 10;
+  return {
+    avg_db: round1(sum / audioSamples.length),
+    peak_db: round1(Math.max(...audioSamples)),
+    samples_count: audioSamples.length
+  };
+}
+
+function getCameraInfo() {
+  if (!stream) return null;
+  const tracks = stream.getVideoTracks();
+  if (tracks.length === 0) return null;
+  const track = tracks[0];
+  const settings = track.getSettings();
+  return {
+    actual_width: settings.width || null,
+    actual_height: settings.height || null,
+    actual_fps: settings.frameRate ? Math.round(settings.frameRate) : null,
+    facing_mode: settings.facingMode || null,
+    device_label: track.label || null
+  };
+}
+
+function calculateSunPosition(lat, lng, date) {
+  const rad = Math.PI / 180;
+  const dayOfYear = Math.floor((date - new Date(date.getFullYear(), 0, 0)) / 86400000);
+  const decl = 23.45 * Math.sin(rad * (360 / 365) * (dayOfYear - 81));
+  const hourUTC = date.getUTCHours() + date.getUTCMinutes() / 60;
+  const localSolarTime = hourUTC + lng / 15;
+  const hourAngle = (localSolarTime - 12) * 15;
+  const altitude = Math.asin(
+    Math.sin(decl * rad) * Math.sin(lat * rad) +
+    Math.cos(decl * rad) * Math.cos(lat * rad) * Math.cos(hourAngle * rad)
+  ) / rad;
+  const azimuth = Math.atan2(
+    -Math.cos(decl * rad) * Math.sin(hourAngle * rad),
+    Math.sin(decl * rad) * Math.cos(lat * rad) - Math.cos(decl * rad) * Math.sin(lat * rad) * Math.cos(hourAngle * rad)
+  ) / rad;
+  return {
+    altitude_deg: Math.round(altitude * 10) / 10,
+    azimuth_deg: Math.round(((azimuth + 360) % 360) * 10) / 10
+  };
 }
 
 // ===== Sidecar metadata =====
@@ -712,7 +926,12 @@ function buildSidecar({ shotId, videoFilename, mimeType, durationSec, stoppedRea
       aspect_ratio_intent: aspect.ratio + ':1',
       resolution_target: '1920x1080'
     },
+    camera: getCameraInfo(),
+    location: currentLocation,
+    sun: currentLocation ? calculateSunPosition(currentLocation.latitude, currentLocation.longitude, startDate) : null,
     tilt: tilt,
+    audio: getAudioStats(),
+    device: deviceInfo,
     session: {
       session_id: sessionId,
       shot_index: shotIndex,
