@@ -46,6 +46,11 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: #000; colo
 #shutter::before { content: ""; width: 50px; height: 50px; border-radius: 50%; background: #fff; transition: all 0.2s; }
 #shutter.recording::before { width: 22px; height: 22px; border-radius: 4px; background: #ff3b3b; }
 
+.hud-top-right { display: flex; align-items: center; gap: 8px; }
+.hud-icon { background: rgba(0,0,0,0.55); border: none; border-radius: 4px; width: 28px; height: 28px; display: none; align-items: center; justify-content: center; padding: 0; cursor: pointer; pointer-events: auto; }
+.hud-icon:active { transform: scale(0.93); }
+.hud-icon svg { width: 16px; height: 16px; }
+
 /* Hint flash */
 #hint { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.7); padding: 10px 16px; border-radius: 6px; font-size: 12px; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
 #hint.on { opacity: 1; }
@@ -69,10 +74,20 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: #000; colo
 <div id="hud">
 <div class="hud-top">
 <div class="hud-pill" id="type-pill">TYPE 1 · 16:9</div>
+<div class="hud-top-right">
+<button id="btn-fullscreen" class="hud-icon" aria-label="전체화면 복귀">
+<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+<polyline points="5,2 2,2 2,5"/>
+<polyline points="11,2 14,2 14,5"/>
+<polyline points="14,11 14,14 11,14"/>
+<polyline points="2,11 2,14 5,14"/>
+</svg>
+</button>
 <div class="hud-level">
 <span>tilt</span>
 <div class="level-track"><div class="level-dot" id="level-dot"></div></div>
 <span id="level-val">0.0°</span>
+</div>
 </div>
 </div>
 
@@ -267,6 +282,7 @@ const recTime = document.getElementById('rec-time');
 const levelDot = document.getElementById('level-dot');
 const levelVal = document.getElementById('level-val');
 const hint = document.getElementById('hint');
+const btnFullscreen = document.getElementById('btn-fullscreen');
 
 function showHint(msg, ms = 1800) {
   hint.textContent = msg;
@@ -297,6 +313,8 @@ async function startCamera() {
     requestOrientation();
     await fsPromise;
     lockOrientationLandscape();
+    history.pushState({trap: true}, '');
+    window.addEventListener('popstate', onPopState);
   } catch (e) {
     gateErr.textContent = '카메라 접근 실패: ' + (e.message || e.name) + '\n주소창의 자물쇠 아이콘에서 권한을 확인해주세요.';
   }
@@ -444,6 +462,36 @@ shutter.addEventListener('click', () => {
 video.addEventListener('click', () => {
   showHint('초점 고정은 기본 카메라 앱에서 길게 탭으로 가능합니다', 2400);
 });
+
+document.addEventListener('fullscreenchange', () => {
+  if (document.fullscreenElement) {
+    btnFullscreen.style.display = 'none';
+  } else {
+    btnFullscreen.style.display = 'flex';
+    showHint('전체화면 복귀 ↗', 2400);
+  }
+});
+
+btnFullscreen.addEventListener('click', async () => {
+  await requestFullscreenSafe();
+  lockOrientationLandscape();
+});
+
+window.addEventListener('beforeunload', (e) => {
+  if (recording) {
+    e.preventDefault();
+    e.returnValue = '녹화 중입니다. 정말 나가시겠습니까?';
+    return e.returnValue;
+  }
+});
+
+function onPopState() {
+  if (recording) {
+    stopRecording();
+    showHint('녹화 중지됨. 다시 뒤로가기를 누르면 종료됩니다', 3000);
+  }
+  history.pushState({trap: true}, '');
+}
 
 drawGuide('type5');
 </script>
