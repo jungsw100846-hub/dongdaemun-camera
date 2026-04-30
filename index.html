@@ -160,6 +160,12 @@ let recInterval = null;
 let currentGuide = null;
 let currentType = null;
 let currentDistrict = null;
+let tiltSamples = [];
+let lastRecDurationSec = 0;
+let lastStopReason = null;
+const sessionId = 'session_' + Math.random().toString(36).slice(2, 10);
+let shotIndex = 0;
+const APP_VERSION = 'phase_2.3';
 
 const DISTRICTS = {
   dongdaemun: { id: 'dongdaemun', name: '동대문 일대', subtitle: '밀리오레 · APM · 굿모닝시티 · 두타' },
@@ -552,6 +558,7 @@ function onOrient(e) {
   } else {
     levelDot.classList.add('off');
   }
+  if (recording) tiltSamples.push(display);
 }
 
 // ===== Recording =====
@@ -580,6 +587,7 @@ function startRecording() {
     return;
   }
   chunks = [];
+  tiltSamples = [];
   recorder.ondataavailable = ev => { if (ev.data && ev.data.size > 0) chunks.push(ev.data); };
   recorder.onstop = onRecordStop;
   recorder.start();
@@ -596,12 +604,15 @@ function updateRecTime() {
   const remaining = Math.max(0, RECORD_SECONDS - elapsed);
   const e = elapsed.toFixed(1).padStart(4, '0');
   recTime.textContent = e + ' / ' + RECORD_SECONDS.toFixed(1);
-  if (elapsed >= RECORD_SECONDS) stopRecording();
+  if (elapsed >= RECORD_SECONDS) stopRecording('auto_completed');
 }
 
-function stopRecording() {
+function stopRecording(reason = 'auto_completed') {
   if (!recorder || !recording) return;
   recording = false;
+  lastRecDurationSec = (Date.now() - recStart) / 1000;
+  lastStopReason = reason;
+  shotIndex++;
   clearInterval(recInterval);
   try { recorder.stop(); } catch (e) {}
   shutter.classList.remove('recording');
@@ -612,26 +623,121 @@ function onRecordStop() {
   const mime = recorder.mimeType || 'video/mp4';
   const ext = mime.includes('mp4') ? 'mp4' : 'webm';
   const blob = new Blob(chunks, { type: mime });
-  const ts = new Date();
+  const ts = new Date(recStart);
   const pad = n => String(n).padStart(2, '0');
   const stamp = ts.getFullYear() + pad(ts.getMonth()+1) + pad(ts.getDate()) + 'T' +
                 pad(ts.getHours()) + pad(ts.getMinutes()) + pad(ts.getSeconds());
-  const name = currentType + '_' + currentDistrict + '_' + stamp + '.' + ext;
+  const shotId = currentType + '_' + currentDistrict + '_' + stamp;
+  const videoName = shotId + '.' + ext;
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = name;
+  a.download = videoName;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 5000);
-  showHint('저장됨: ' + name, 2400);
+
+  const sidecar = buildSidecar({
+    shotId,
+    videoFilename: videoName,
+    mimeType: mime,
+    durationSec: lastRecDurationSec,
+    stoppedReason: lastStopReason
+  });
+  downloadSidecar(sidecar, shotId);
+
+  showHint('내 파일 > Download 폴더에 영상 + 메타데이터 저장됨', 4000);
+}
+
+// ===== Sidecar metadata =====
+function isoLocal(date) {
+  const pad = n => String(n).padStart(2, '0');
+  const tzMin = -date.getTimezoneOffset();
+  const tzSign = tzMin >= 0 ? '+' : '-';
+  const tzH = pad(Math.floor(Math.abs(tzMin) / 60));
+  const tzM = pad(Math.abs(tzMin) % 60);
+  return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) +
+    'T' + pad(date.getHours()) + ':' + pad(date.getMinutes()) + ':' + pad(date.getSeconds()) +
+    tzSign + tzH + ':' + tzM;
+}
+
+function isoUtc(date) {
+  return date.toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
+
+function buildSidecar({ shotId, videoFilename, mimeType, durationSec, stoppedReason }) {
+  const startDate = new Date(recStart);
+  const typeSpec = GUIDE_TYPES[currentType];
+  const districtSpec = DISTRICTS[currentDistrict];
+  const aspect = ASPECT_MASKS[typeSpec.aspectMask];
+  const round1 = n => Math.round(n * 10) / 10;
+
+  let tilt;
+  if (tiltSamples.length === 0) {
+    tilt = {
+      tolerance_deg: typeSpec.tiltTolerance,
+      min_deg: null,
+      max_deg: null,
+      avg_deg: null,
+      in_range_pct: null
+    };
+  } else {
+    const sum = tiltSamples.reduce((a, b) => a + b, 0);
+    const inRange = tiltSamples.filter(s => Math.abs(s) <= typeSpec.tiltTolerance).length;
+    tilt = {
+      tolerance_deg: typeSpec.tiltTolerance,
+      min_deg: round1(Math.min(...tiltSamples)),
+      max_deg: round1(Math.max(...tiltSamples)),
+      avg_deg: round1(sum / tiltSamples.length),
+      in_range_pct: Math.round((inRange / tiltSamples.length) * 100)
+    };
+  }
+
+  return {
+    shot_id: shotId,
+    type: { id: typeSpec.id, name: typeSpec.name, subtitle: typeSpec.subtitle },
+    district: { id: districtSpec.id, name: districtSpec.name },
+    recording: {
+      started_at_local: isoLocal(startDate),
+      started_at_utc: isoUtc(startDate),
+      duration_target_sec: RECORD_SECONDS,
+      duration_actual_sec: round1(durationSec),
+      stopped_reason: stoppedReason
+    },
+    video: {
+      filename: videoFilename,
+      mime_type: mimeType,
+      aspect_ratio_native: '16:9',
+      aspect_ratio_intent: aspect.ratio + ':1',
+      resolution_target: '1920x1080'
+    },
+    tilt: tilt,
+    session: {
+      session_id: sessionId,
+      shot_index: shotIndex,
+      total_shots_in_session: shotIndex
+    },
+    app_version: APP_VERSION
+  };
+}
+
+function downloadSidecar(jsonObj, basename) {
+  const blob = new Blob([JSON.stringify(jsonObj, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = basename + '.json';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
 // ===== Wire up =====
 startBtn.addEventListener('click', startCamera);
 shutter.addEventListener('click', () => {
-  if (recording) stopRecording();
+  if (recording) stopRecording('user_stopped');
   else startRecording();
 });
 
@@ -664,7 +770,7 @@ window.addEventListener('beforeunload', (e) => {
 
 function onPopState() {
   if (recording) {
-    stopRecording();
+    stopRecording('back_button');
     showHint('녹화 중지됨. 다시 뒤로가기를 누르면 종료됩니다', 3000);
   }
   history.pushState({trap: true}, '');
@@ -675,7 +781,7 @@ document.getElementById('btn-back-to-types').addEventListener('click', () => {
 });
 
 document.getElementById('type-pill').addEventListener('click', () => {
-  if (recording) stopRecording();
+  if (recording) stopRecording('user_stopped');
   showScreen('type-select');
 });
 
