@@ -110,8 +110,48 @@ const GUIDE_TYPES = {
     subtitle: '밀리오레 · APM',
     aspectMask: 'cinemascope_2_39',
     tiltTolerance: 1.0,
-    building: { xPct: 25, widthPct: 50, yPct: 32.6, heightPct: 37 },
-    lifeZone: { yPct: 72.2 }
+    building: { x: 480, width: 960, y: 352, height: 400 },
+    lifeZone: { y: 780 }
+  },
+  type2: {
+    id: 'type2',
+    name: '박스형',
+    subtitle: '굿모닝시티',
+    aspectMask: 'cinemascope_2_39',
+    tiltTolerance: 1.0,
+    building: { x: 576, width: 768, y: 288, height: 512 },
+    lifeZone: { y: 800 }
+  },
+  type3: {
+    id: 'type3',
+    name: '타워형',
+    subtitle: '두타',
+    aspectMask: 'cinemascope_2_39',
+    tiltTolerance: 1.0,
+    building: { x: 825, width: 270, y: 200, height: 640 },
+    lifeZone: { y: 840 }
+  },
+  type4: {
+    id: 'type4',
+    name: '저층 가로형',
+    subtitle: '저층 도시 조직',
+    aspectMask: 'cinemascope_2_39',
+    tiltTolerance: 1.0,
+    building: { x: 768, width: 384, y: 540, height: 260 },
+    lifeZone: { y: 800 },
+    contextDividers: true
+  },
+  type5: {
+    id: 'type5',
+    name: '근경',
+    subtitle: '1층 표면 · 시장',
+    aspectMask: 'cinemascope_2_39',
+    tiltTolerance: 0.5,
+    building: { x: 0, width: 1920, y: 420, height: 380 },
+    lifeZone: { y: 830 },
+    bracketStyle: 'fullOutline',
+    facadeBoundary: { y: 420 },
+    eyeLevel: { y: 580, label: 'eye-level (1.5m)' }
   }
 };
 
@@ -138,27 +178,62 @@ function drawGuide(typeId) {
   svg.appendChild(svgEl('line', { x1: 0, y1: maskTop, x2: VW, y2: maskTop, stroke: '#fff', 'stroke-width': 2, 'stroke-opacity': 0.5 }));
   svg.appendChild(svgEl('line', { x1: 0, y1: maskBottom, x2: VW, y2: maskBottom, stroke: '#fff', 'stroke-width': 2, 'stroke-opacity': 0.5 }));
 
-  const bx = Math.round(VW * spec.building.xPct / 100);
-  const by = Math.round(VH * spec.building.yPct / 100);
-  const bw = Math.round(VW * spec.building.widthPct / 100);
-  const bh = Math.round(VH * spec.building.heightPct / 100);
+  const bx = spec.building.x;
+  const by = spec.building.y;
+  const bw = spec.building.width;
+  const bh = spec.building.height;
   const bx2 = bx + bw, by2 = by + bh;
-  const leg = 56;
-  const bracket = svgEl('g', { stroke: '#ffffff', 'stroke-width': 6, 'stroke-linecap': 'square', fill: 'none' });
-  bracket.appendChild(svgEl('polyline', { points: `${bx},${by + leg} ${bx},${by} ${bx + leg},${by}` }));
-  bracket.appendChild(svgEl('polyline', { points: `${bx2},${by + leg} ${bx2},${by} ${bx2 - leg},${by}` }));
-  bracket.appendChild(svgEl('polyline', { points: `${bx},${by2 - leg} ${bx},${by2} ${bx + leg},${by2}` }));
-  bracket.appendChild(svgEl('polyline', { points: `${bx2},${by2 - leg} ${bx2},${by2} ${bx2 - leg},${by2}` }));
-  svg.appendChild(bracket);
+  const buildingGroup = svgEl('g', { stroke: '#ffffff', 'stroke-width': 6, 'stroke-linecap': 'square', fill: 'none' });
+  if (spec.bracketStyle === 'fullOutline') {
+    buildingGroup.appendChild(svgEl('rect', { x: bx, y: by, width: bw, height: bh }));
+  } else {
+    const leg = 56;
+    buildingGroup.appendChild(svgEl('polyline', { points: `${bx},${by + leg} ${bx},${by} ${bx + leg},${by}` }));
+    buildingGroup.appendChild(svgEl('polyline', { points: `${bx2},${by + leg} ${bx2},${by} ${bx2 - leg},${by}` }));
+    buildingGroup.appendChild(svgEl('polyline', { points: `${bx},${by2 - leg} ${bx},${by2} ${bx + leg},${by2}` }));
+    buildingGroup.appendChild(svgEl('polyline', { points: `${bx2},${by2 - leg} ${bx2},${by2} ${bx2 - leg},${by2}` }));
+  }
+  svg.appendChild(buildingGroup);
 
   const margins = svgEl('g', { stroke: '#ffffff', 'stroke-width': 2, 'stroke-opacity': 0.4, 'stroke-dasharray': '4,8', fill: 'none' });
   margins.appendChild(svgEl('line', { x1: bx, y1: 200, x2: bx, y2: 880 }));
   margins.appendChild(svgEl('line', { x1: bx2, y1: 200, x2: bx2, y2: 880 }));
   svg.appendChild(margins);
 
-  const lifeY = Math.round(VH * spec.lifeZone.yPct / 100);
+  if (spec.contextDividers) {
+    const dividers = svgEl('g', { stroke: '#ffffff', 'stroke-width': 2, 'stroke-opacity': 0.55, 'stroke-dasharray': '10,8', fill: 'none' });
+    dividers.appendChild(svgEl('line', { x1: bx, y1: maskTop, x2: bx, y2: maskBottom }));
+    dividers.appendChild(svgEl('line', { x1: bx2, y1: maskTop, x2: bx2, y2: maskBottom }));
+    svg.appendChild(dividers);
+  }
+
+  if (spec.facadeBoundary) {
+    svg.appendChild(svgEl('line', {
+      x1: 0, y1: spec.facadeBoundary.y, x2: VW, y2: spec.facadeBoundary.y,
+      stroke: '#fff', 'stroke-width': 2, 'stroke-opacity': 0.7, 'stroke-dasharray': '12,8'
+    }));
+  }
+
+  const lifeY = spec.lifeZone.y;
   svg.appendChild(svgEl('line', { x1: 0, y1: lifeY, x2: VW, y2: lifeY, stroke: '#fff', 'stroke-width': 2, 'stroke-opacity': 0.55, 'stroke-dasharray': '8,12' }));
   svg.appendChild(svgEl('line', { id: 'life-line', x1: 0, y1: lifeY, x2: VW, y2: lifeY, stroke: '#5DCAA5', 'stroke-width': 3, 'stroke-opacity': 0.85, 'stroke-dasharray': '16,12' }));
+
+  if (spec.eyeLevel) {
+    const eyeY = spec.eyeLevel.y;
+    svg.appendChild(svgEl('line', {
+      x1: 0, y1: eyeY, x2: VW, y2: eyeY,
+      stroke: '#5DCAA5', 'stroke-width': 4, 'stroke-opacity': 0.85, 'stroke-dasharray': '20,10'
+    }));
+    if (spec.eyeLevel.label) {
+      const text = svgEl('text', {
+        x: VW - 24, y: eyeY - 14,
+        fill: '#5DCAA5', 'font-size': 22, 'font-family': 'ui-monospace, "SF Mono", Menlo, monospace',
+        'text-anchor': 'end', 'fill-opacity': 0.95
+      });
+      text.textContent = spec.eyeLevel.label;
+      svg.appendChild(text);
+    }
+  }
 
   svg.appendChild(svgEl('line', { id: 'center-axis', x1: VW / 2, y1: maskTop, x2: VW / 2, y2: maskBottom, stroke: '#fff', 'stroke-width': 2, 'stroke-opacity': 0.4, 'stroke-dasharray': '6,16' }));
 
@@ -354,7 +429,7 @@ video.addEventListener('click', () => {
   showHint('초점 고정은 기본 카메라 앱에서 길게 탭으로 가능합니다', 2400);
 });
 
-drawGuide('type1');
+drawGuide('type5');
 </script>
 
 </body>
