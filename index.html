@@ -54,6 +54,34 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: #000; colo
 /* Hint flash */
 #hint { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.7); padding: 10px 16px; border-radius: 6px; font-size: 12px; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
 #hint.on { opacity: 1; }
+
+/* Type / District select screens */
+#type-select, #district-select { position: fixed; inset: 0; background: #0e0e0d; display: none; flex-direction: column; padding: 20px 28px; z-index: 50; overflow: hidden; }
+.screen-header h1 { font-size: 18px; font-weight: 500; margin-bottom: 4px; letter-spacing: 0.02em; }
+.screen-header .subtitle { font-size: 12px; color: rgba(255,255,255,0.5); margin-bottom: 16px; line-height: 1.5; }
+
+.type-grid { flex: 1; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr 1fr; gap: 8px; min-height: 0; }
+.type-card { background: rgba(255,255,255,0.04); border: 0.5px solid rgba(255,255,255,0.15); border-radius: 8px; padding: 10px 12px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s, border-color 0.2s, transform 0.15s; min-width: 0; overflow: hidden; }
+.type-card:active { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.25); transform: scale(0.98); }
+.type-card-wide { grid-column: 1 / 3; }
+.type-card svg { width: 56px; height: 40px; flex-shrink: 0; }
+.type-card .info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.type-card .name { font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.type-card .subtitle { font-size: 10px; color: rgba(255,255,255,0.5); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.district-pill { align-self: flex-start; background: rgba(93,202,165,0.12); color: #5DCAA5; padding: 4px 10px; border-radius: 4px; font-size: 10px; font-family: ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: 0.04em; margin-bottom: 14px; }
+.district-list { display: flex; flex-direction: column; gap: 8px; }
+.district-card { background: rgba(255,255,255,0.04); border: 0.5px solid rgba(255,255,255,0.15); border-radius: 8px; padding: 12px 14px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s, transform 0.15s; }
+.district-card:active { background: rgba(255,255,255,0.08); transform: scale(0.98); }
+.district-card .pin { width: 18px; height: 18px; flex-shrink: 0; opacity: 0.85; }
+.district-card .info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.district-card .name { font-size: 13px; font-weight: 500; }
+.district-card .subtitle { font-size: 11px; color: rgba(255,255,255,0.5); }
+
+.back-btn { margin-top: auto; align-self: flex-start; background: transparent; border: none; color: rgba(255,255,255,0.6); font-size: 13px; padding: 8px 4px; cursor: pointer; transition: color 0.2s; }
+.back-btn:active { color: #fff; }
+
+#type-pill { cursor: pointer; pointer-events: auto; }
 </style>
 </head>
 <body>
@@ -62,8 +90,28 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: #000; colo
 <div id="gate">
 <h1>Dongdaemun Camera</h1>
 <p>건물 정면 촬영을 위한 가이드 카메라.<br>카메라 권한이 필요합니다.</p>
-<button id="btn-start">카메라 시작</button>
+<button id="btn-start">시작</button>
 <div id="gate-err" class="err"></div>
+</div>
+
+<!-- ===== Type Select ===== -->
+<div id="type-select">
+<div class="screen-header">
+<h1>촬영할 건물의 형태</h1>
+<div class="subtitle">건물의 매스에 가장 가까운 유형을 선택</div>
+</div>
+<div class="type-grid" id="type-grid"></div>
+</div>
+
+<!-- ===== District Select ===== -->
+<div id="district-select">
+<div class="district-pill" id="district-type-pill"></div>
+<div class="screen-header">
+<h1>촬영 지역</h1>
+<div class="subtitle">현재 촬영하는 위치를 선택</div>
+</div>
+<div class="district-list" id="district-list"></div>
+<button class="back-btn" id="btn-back-to-types">← 뒤로</button>
 </div>
 
 <!-- ===== Camera Stage ===== -->
@@ -110,6 +158,14 @@ let recording = false;
 let recStart = 0;
 let recInterval = null;
 let currentGuide = null;
+let currentType = null;
+let currentDistrict = null;
+
+const DISTRICTS = {
+  dongdaemun: { id: 'dongdaemun', name: '동대문 일대', subtitle: '밀리오레 · APM · 굿모닝시티 · 두타' },
+  middle:     { id: 'middle',     name: '중간 구간',   subtitle: '동대문~신당 사이 가로 · 골목 건물' },
+  sindang:    { id: 'sindang',    name: '신당 일대',   subtitle: '중앙시장 · 신당역 인근 저층 · 시장 가옥' }
+};
 
 // ===== Guide rendering =====
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -180,8 +236,6 @@ function svgEl(tag, attrs) {
 function drawGuide(typeId) {
   const spec = GUIDE_TYPES[typeId];
   currentGuide = spec;
-  const pill = document.getElementById('type-pill');
-  if (pill) pill.textContent = 'TYPE ' + typeId.slice(4) + ' · 16:9';
   const svg = document.getElementById('guide');
   const VW = VIEWBOX.w, VH = VIEWBOX.h;
   while (svg.firstChild) svg.removeChild(svg.firstChild);
@@ -270,6 +324,129 @@ function drawGuide(typeId) {
   svg.appendChild(reticle);
 }
 
+// ===== Pictograms =====
+const PICTOGRAMS = {
+  type1: () => [
+    svgEl('rect', { x: 8, y: 14, width: 64, height: 28 }),
+    svgEl('line', { x1: 8, y1: 23, x2: 72, y2: 23 }),
+    svgEl('line', { x1: 8, y1: 32, x2: 72, y2: 32 })
+  ],
+  type2: () => [
+    svgEl('polyline', { points: '22,16 22,48 58,48 58,16' }),
+    svgEl('line', { x1: 22, y1: 16, x2: 58, y2: 16, 'stroke-dasharray': '3,2' }),
+    svgEl('line', { x1: 22, y1: 27, x2: 58, y2: 27 }),
+    svgEl('line', { x1: 22, y1: 38, x2: 58, y2: 38 }),
+    svgEl('line', { x1: 40, y1: 16, x2: 40, y2: 48 })
+  ],
+  type3: () => [
+    svgEl('rect', { x: 36, y: 8, width: 8, height: 40 }),
+    svgEl('rect', { x: 18, y: 32, width: 14, height: 16 }),
+    svgEl('rect', { x: 48, y: 32, width: 14, height: 16 })
+  ],
+  type4: () => [
+    svgEl('rect', { x: 32, y: 22, width: 16, height: 22 }),
+    svgEl('rect', { x: 14, y: 30, width: 12, height: 14 }),
+    svgEl('rect', { x: 54, y: 30, width: 12, height: 14 })
+  ],
+  type5: () => [
+    svgEl('rect', { x: 4, y: 24, width: 72, height: 18 }),
+    svgEl('line', { x1: 16, y1: 24, x2: 16, y2: 42 }),
+    svgEl('line', { x1: 28, y1: 24, x2: 28, y2: 42 }),
+    svgEl('line', { x1: 40, y1: 24, x2: 40, y2: 42 }),
+    svgEl('line', { x1: 52, y1: 24, x2: 52, y2: 42 }),
+    svgEl('line', { x1: 64, y1: 24, x2: 64, y2: 42 })
+  ]
+};
+
+function pinIcon() {
+  const svg = svgEl('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: '#fff', 'stroke-width': 1.5, 'stroke-linejoin': 'round', class: 'pin' });
+  svg.appendChild(svgEl('path', { d: 'M12 22 C12 22 5 14 5 9 C5 5 8 2 12 2 C16 2 19 5 19 9 C19 14 12 22 12 22 Z' }));
+  svg.appendChild(svgEl('circle', { cx: 12, cy: 9, r: 2.5 }));
+  return svg;
+}
+
+// ===== Screen flow =====
+function showScreen(id) {
+  const displays = { gate: 'flex', 'type-select': 'flex', 'district-select': 'flex', stage: 'block' };
+  for (const s in displays) {
+    const el = document.getElementById(s);
+    if (!el) continue;
+    el.style.display = (s === id) ? displays[s] : 'none';
+  }
+}
+
+function selectType(typeId) {
+  currentType = typeId;
+  const pill = document.getElementById('district-type-pill');
+  pill.textContent = '● TYPE ' + typeId.slice(4) + ' · ' + GUIDE_TYPES[typeId].name;
+  showScreen('district-select');
+}
+
+function selectDistrict(districtId) {
+  currentDistrict = districtId;
+  drawGuide(currentType);
+  updateTypePill();
+  showScreen('stage');
+}
+
+function updateTypePill() {
+  const pill = document.getElementById('type-pill');
+  if (!pill || !currentType) return;
+  const districtPart = currentDistrict ? currentDistrict.toUpperCase() : '';
+  pill.textContent = 'TYPE ' + currentType.slice(4) + ' · ' + districtPart;
+}
+
+// ===== Card builders =====
+function buildTypeCards() {
+  const container = document.getElementById('type-grid');
+  container.innerHTML = '';
+  ['type1', 'type2', 'type3', 'type4', 'type5'].forEach(id => {
+    const spec = GUIDE_TYPES[id];
+    const card = document.createElement('div');
+    card.className = 'type-card' + (id === 'type5' ? ' type-card-wide' : '');
+    const svg = svgEl('svg', { viewBox: '0 0 80 56', fill: 'none', stroke: '#fff', 'stroke-width': 1.2, 'stroke-linejoin': 'miter' });
+    PICTOGRAMS[id]().forEach(el => svg.appendChild(el));
+    card.appendChild(svg);
+    const info = document.createElement('div');
+    info.className = 'info';
+    const name = document.createElement('div');
+    name.className = 'name';
+    name.textContent = 'Type ' + id.slice(4) + ' · ' + spec.name;
+    const subtitle = document.createElement('div');
+    subtitle.className = 'subtitle';
+    subtitle.textContent = spec.subtitle;
+    info.appendChild(name);
+    info.appendChild(subtitle);
+    card.appendChild(info);
+    card.addEventListener('click', () => selectType(id));
+    container.appendChild(card);
+  });
+}
+
+function buildDistrictCards() {
+  const container = document.getElementById('district-list');
+  container.innerHTML = '';
+  ['dongdaemun', 'middle', 'sindang'].forEach(id => {
+    const spec = DISTRICTS[id];
+    const card = document.createElement('div');
+    card.className = 'district-card';
+    card.appendChild(pinIcon());
+    const info = document.createElement('div');
+    info.className = 'info';
+    const name = document.createElement('div');
+    name.className = 'name';
+    name.textContent = spec.name;
+    const subtitle = document.createElement('div');
+    subtitle.className = 'subtitle';
+    subtitle.textContent = spec.subtitle;
+    info.appendChild(name);
+    info.appendChild(subtitle);
+    card.appendChild(info);
+    card.addEventListener('click', () => selectDistrict(id));
+    container.appendChild(card);
+  });
+}
+
 // ===== Permission gate =====
 const gate = document.getElementById('gate');
 const stage = document.getElementById('stage');
@@ -308,12 +485,11 @@ async function startCamera() {
     });
     video.srcObject = stream;
     await video.play();
-    gate.style.display = 'none';
-    stage.style.display = 'block';
     requestOrientation();
     await fsPromise;
     lockOrientationLandscape();
-    history.pushState({trap: true}, '');
+    showScreen('type-select');
+    history.pushState({ trap: true }, '');
     window.addEventListener('popstate', onPopState);
   } catch (e) {
     gateErr.textContent = '카메라 접근 실패: ' + (e.message || e.name) + '\n주소창의 자물쇠 아이콘에서 권한을 확인해주세요.';
@@ -359,6 +535,7 @@ function attachOrientation() {
 }
 
 function onOrient(e) {
+  if (!currentGuide) return;
   // deviceorientation axes are fixed to the device, not the screen — when the
   // user rotates to landscape, horizon tilt moves from gamma (roll) to beta (pitch).
   const angle = (screen.orientation && screen.orientation.angle) || 0;
@@ -439,7 +616,7 @@ function onRecordStop() {
   const pad = n => String(n).padStart(2, '0');
   const stamp = ts.getFullYear() + pad(ts.getMonth()+1) + pad(ts.getDate()) + 'T' +
                 pad(ts.getHours()) + pad(ts.getMinutes()) + pad(ts.getSeconds());
-  const name = 'type1_' + stamp + '.' + ext;
+  const name = currentType + '_' + currentDistrict + '_' + stamp + '.' + ext;
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -493,7 +670,17 @@ function onPopState() {
   history.pushState({trap: true}, '');
 }
 
-drawGuide('type5');
+document.getElementById('btn-back-to-types').addEventListener('click', () => {
+  showScreen('type-select');
+});
+
+document.getElementById('type-pill').addEventListener('click', () => {
+  if (recording) stopRecording();
+  showScreen('type-select');
+});
+
+buildTypeCards();
+buildDistrictCards();
 </script>
 
 </body>
