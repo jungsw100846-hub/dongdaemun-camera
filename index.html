@@ -211,15 +211,15 @@ function attachOrientation() {
 }
 
 function onOrient(e) {
-  // For landscape, the relevant tilt is gamma (left-right roll around device's long axis).
-  // When phone is held in landscape, gamma represents the "horizon tilt" we care about.
-  // beta is pitch (forward/back), gamma is roll (left/right).
-  // We use gamma adjusted: 0 means perfectly level.
-  let tilt = e.gamma || 0;
-  // Display value clamped
+  // deviceorientation axes are fixed to the device, not the screen — when the
+  // user rotates to landscape, horizon tilt moves from gamma (roll) to beta (pitch).
+  const angle = (screen.orientation && screen.orientation.angle) || 0;
+  let tilt;
+  if (angle === 90) tilt = e.beta || 0;
+  else if (angle === 270) tilt = -(e.beta || 0);
+  else tilt = e.gamma || 0;
   const display = Math.max(-15, Math.min(15, tilt));
   levelVal.textContent = (display >= 0 ? '+' : '') + display.toFixed(1) + '°';
-  // Map -15..+15 to 0..100% for dot position
   const pct = 50 + (display / 15) * 50;
   levelDot.style.left = Math.max(0, Math.min(100, pct)) + '%';
   if (Math.abs(display) <= TILT_TOLERANCE) {
