@@ -63,50 +63,7 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: #000; colo
 <!-- ===== Camera Stage ===== -->
 <div id="stage">
 <video id="video" autoplay playsinline muted></video>
-<svg id="guide" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
-<!-- Cinemascope mask: 2.39:1 inside 16:9
-     1920/2.39 = 803, mask top = (1080-803)/2 = 138.5 -->
-<rect x="0" y="0" width="1920" height="138" fill="#000" fill-opacity="0.78"/>
-<rect x="0" y="942" width="1920" height="138" fill="#000" fill-opacity="0.78"/>
-<line x1="0" y1="138" x2="1920" y2="138" stroke="#fff" stroke-width="2" stroke-opacity="0.5"/>
-<line x1="0" y1="942" x2="1920" y2="942" stroke="#fff" stroke-width="2" stroke-opacity="0.5"/>
-
-<!-- Type 1 — Building bracket: x=480..1440 (50% width), y=352..752 -->
-<g stroke="#ffffff" stroke-width="6" stroke-linecap="square" fill="none">
-<polyline points="480,408 480,352 536,352"/>
-<polyline points="1440,408 1440,352 1384,352"/>
-<polyline points="480,696 480,752 536,752"/>
-<polyline points="1440,696 1440,752 1384,752"/>
-</g>
-
-<!-- Side margin guides -->
-<g stroke="#ffffff" stroke-width="2" stroke-opacity="0.4" stroke-dasharray="4,8" fill="none">
-<line x1="480" y1="200" x2="480" y2="880"/>
-<line x1="1440" y1="200" x2="1440" y2="880"/>
-</g>
-
-<!-- Ground line -->
-<line x1="0" y1="780" x2="1920" y2="780" stroke="#fff" stroke-width="2" stroke-opacity="0.55" stroke-dasharray="8,12"/>
-
-<!-- Life zone divider (cyan/teal) -->
-<line id="life-line" x1="0" y1="780" x2="1920" y2="780" stroke="#5DCAA5" stroke-width="3" stroke-opacity="0.85" stroke-dasharray="16,12"/>
-
-<!-- Vertical center axis -->
-<line id="center-axis" x1="960" y1="138" x2="960" y2="942" stroke="#fff" stroke-width="2" stroke-opacity="0.4" stroke-dasharray="6,16"/>
-
-<!-- Horizontal thirds (very subtle) -->
-<line x1="0" y1="406" x2="1920" y2="406" stroke="#fff" stroke-width="1.5" stroke-opacity="0.22" stroke-dasharray="3,16"/>
-<line x1="0" y1="675" x2="1920" y2="675" stroke="#fff" stroke-width="1.5" stroke-opacity="0.22" stroke-dasharray="3,16"/>
-
-<!-- Center reticle -->
-<g stroke="#ffffff" stroke-width="3" stroke-opacity="0.7" fill="none">
-<circle cx="960" cy="540" r="14"/>
-<line x1="934" y1="540" x2="946" y2="540"/>
-<line x1="974" y1="540" x2="986" y2="540"/>
-<line x1="960" y1="514" x2="960" y2="526"/>
-<line x1="960" y1="554" x2="960" y2="566"/>
-</g>
-</svg>
+<svg id="guide" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg"></svg>
 
 <div id="hud">
 <div class="hud-top">
@@ -130,13 +87,95 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: #000; colo
 <script>
 // ===== State =====
 const RECORD_SECONDS = 20;
-const TILT_TOLERANCE = 1.0; // degrees
 let stream = null;
 let recorder = null;
 let chunks = [];
 let recording = false;
 let recStart = 0;
 let recInterval = null;
+let currentGuide = null;
+
+// ===== Guide rendering =====
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const VIEWBOX = { w: 1920, h: 1080 };
+
+const ASPECT_MASKS = {
+  cinemascope_2_39: { ratio: 2.39 }
+};
+
+const GUIDE_TYPES = {
+  type1: {
+    id: 'type1',
+    name: '가로형',
+    subtitle: '밀리오레 · APM',
+    aspectMask: 'cinemascope_2_39',
+    tiltTolerance: 1.0,
+    building: { xPct: 25, widthPct: 50, yPct: 32.6, heightPct: 37 },
+    lifeZone: { yPct: 72.2 }
+  }
+};
+
+function svgEl(tag, attrs) {
+  const e = document.createElementNS(SVG_NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  return e;
+}
+
+function drawGuide(typeId) {
+  const spec = GUIDE_TYPES[typeId];
+  currentGuide = spec;
+  const svg = document.getElementById('guide');
+  const VW = VIEWBOX.w, VH = VIEWBOX.h;
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+
+  const mask = ASPECT_MASKS[spec.aspectMask];
+  const maskH = Math.round((VH - VW / mask.ratio) / 2);
+  const maskTop = maskH;
+  const maskBottom = VH - maskH;
+  const visibleH = VH - 2 * maskH;
+  svg.appendChild(svgEl('rect', { x: 0, y: 0, width: VW, height: maskH, fill: '#000', 'fill-opacity': 0.78 }));
+  svg.appendChild(svgEl('rect', { x: 0, y: maskBottom, width: VW, height: maskH, fill: '#000', 'fill-opacity': 0.78 }));
+  svg.appendChild(svgEl('line', { x1: 0, y1: maskTop, x2: VW, y2: maskTop, stroke: '#fff', 'stroke-width': 2, 'stroke-opacity': 0.5 }));
+  svg.appendChild(svgEl('line', { x1: 0, y1: maskBottom, x2: VW, y2: maskBottom, stroke: '#fff', 'stroke-width': 2, 'stroke-opacity': 0.5 }));
+
+  const bx = Math.round(VW * spec.building.xPct / 100);
+  const by = Math.round(VH * spec.building.yPct / 100);
+  const bw = Math.round(VW * spec.building.widthPct / 100);
+  const bh = Math.round(VH * spec.building.heightPct / 100);
+  const bx2 = bx + bw, by2 = by + bh;
+  const leg = 56;
+  const bracket = svgEl('g', { stroke: '#ffffff', 'stroke-width': 6, 'stroke-linecap': 'square', fill: 'none' });
+  bracket.appendChild(svgEl('polyline', { points: `${bx},${by + leg} ${bx},${by} ${bx + leg},${by}` }));
+  bracket.appendChild(svgEl('polyline', { points: `${bx2},${by + leg} ${bx2},${by} ${bx2 - leg},${by}` }));
+  bracket.appendChild(svgEl('polyline', { points: `${bx},${by2 - leg} ${bx},${by2} ${bx + leg},${by2}` }));
+  bracket.appendChild(svgEl('polyline', { points: `${bx2},${by2 - leg} ${bx2},${by2} ${bx2 - leg},${by2}` }));
+  svg.appendChild(bracket);
+
+  const margins = svgEl('g', { stroke: '#ffffff', 'stroke-width': 2, 'stroke-opacity': 0.4, 'stroke-dasharray': '4,8', fill: 'none' });
+  margins.appendChild(svgEl('line', { x1: bx, y1: 200, x2: bx, y2: 880 }));
+  margins.appendChild(svgEl('line', { x1: bx2, y1: 200, x2: bx2, y2: 880 }));
+  svg.appendChild(margins);
+
+  const lifeY = Math.round(VH * spec.lifeZone.yPct / 100);
+  svg.appendChild(svgEl('line', { x1: 0, y1: lifeY, x2: VW, y2: lifeY, stroke: '#fff', 'stroke-width': 2, 'stroke-opacity': 0.55, 'stroke-dasharray': '8,12' }));
+  svg.appendChild(svgEl('line', { id: 'life-line', x1: 0, y1: lifeY, x2: VW, y2: lifeY, stroke: '#5DCAA5', 'stroke-width': 3, 'stroke-opacity': 0.85, 'stroke-dasharray': '16,12' }));
+
+  svg.appendChild(svgEl('line', { id: 'center-axis', x1: VW / 2, y1: maskTop, x2: VW / 2, y2: maskBottom, stroke: '#fff', 'stroke-width': 2, 'stroke-opacity': 0.4, 'stroke-dasharray': '6,16' }));
+
+  const third1 = Math.round(maskTop + visibleH / 3);
+  const third2 = Math.round(maskTop + 2 * visibleH / 3);
+  svg.appendChild(svgEl('line', { x1: 0, y1: third1, x2: VW, y2: third1, stroke: '#fff', 'stroke-width': 1.5, 'stroke-opacity': 0.22, 'stroke-dasharray': '3,16' }));
+  svg.appendChild(svgEl('line', { x1: 0, y1: third2, x2: VW, y2: third2, stroke: '#fff', 'stroke-width': 1.5, 'stroke-opacity': 0.22, 'stroke-dasharray': '3,16' }));
+
+  const cx = VW / 2, cy = VH / 2;
+  const reticle = svgEl('g', { stroke: '#ffffff', 'stroke-width': 3, 'stroke-opacity': 0.7, fill: 'none' });
+  reticle.appendChild(svgEl('circle', { cx, cy, r: 14 }));
+  reticle.appendChild(svgEl('line', { x1: cx - 26, y1: cy, x2: cx - 14, y2: cy }));
+  reticle.appendChild(svgEl('line', { x1: cx + 14, y1: cy, x2: cx + 26, y2: cy }));
+  reticle.appendChild(svgEl('line', { x1: cx, y1: cy - 26, x2: cx, y2: cy - 14 }));
+  reticle.appendChild(svgEl('line', { x1: cx, y1: cy + 14, x2: cx, y2: cy + 26 }));
+  svg.appendChild(reticle);
+}
 
 // ===== Permission gate =====
 const gate = document.getElementById('gate');
@@ -222,7 +261,7 @@ function onOrient(e) {
   levelVal.textContent = (display >= 0 ? '+' : '') + display.toFixed(1) + '°';
   const pct = 50 + (display / 15) * 50;
   levelDot.style.left = Math.max(0, Math.min(100, pct)) + '%';
-  if (Math.abs(display) <= TILT_TOLERANCE) {
+  if (Math.abs(display) <= currentGuide.tiltTolerance) {
     levelDot.classList.remove('off');
   } else {
     levelDot.classList.add('off');
@@ -314,6 +353,8 @@ shutter.addEventListener('click', () => {
 video.addEventListener('click', () => {
   showHint('초점 고정은 기본 카메라 앱에서 길게 탭으로 가능합니다', 2400);
 });
+
+drawGuide('type1');
 </script>
 
 </body>
